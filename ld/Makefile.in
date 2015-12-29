@@ -371,18 +371,18 @@ tooldir = $(exec_prefix)/$(target_alias)
 
 # Automake 1.10+ disables lex and yacc output file regeneration if
 # maintainer mode is disabled.  Avoid this.
-am__skiplex = 
-am__skipyacc = 
+am__skiplex =
+am__skipyacc =
 AM_CFLAGS = $(WARN_CFLAGS)
-@ENABLE_PLUGINS_FALSE@PLUGIN_C = 
+@ENABLE_PLUGINS_FALSE@PLUGIN_C =
 
 # Conditionally enable the plugin interface.
 @ENABLE_PLUGINS_TRUE@PLUGIN_C = plugin.c
-@ENABLE_PLUGINS_FALSE@PLUGIN_H = 
+@ENABLE_PLUGINS_FALSE@PLUGIN_H =
 @ENABLE_PLUGINS_TRUE@PLUGIN_H = plugin.h
-@ENABLE_PLUGINS_FALSE@PLUGIN_OBJECT = 
+@ENABLE_PLUGINS_FALSE@PLUGIN_OBJECT =
 @ENABLE_PLUGINS_TRUE@PLUGIN_OBJECT = plugin.@OBJEXT@
-@ENABLE_PLUGINS_FALSE@PLUGIN_CFLAGS = 
+@ENABLE_PLUGINS_FALSE@PLUGIN_CFLAGS =
 @ENABLE_PLUGINS_TRUE@PLUGIN_CFLAGS = -DENABLE_PLUGINS
 
 # We put the scripts in the directory $(scriptdir)/ldscripts.
@@ -407,7 +407,7 @@ HOSTING_EMU = -m $(EMUL)
 # Setup the testing framework, if you have one
 EXPECT = expect
 RUNTEST = runtest
-RUNTESTFLAGS = 
+RUNTESTFLAGS =
 CC_FOR_TARGET = ` \
   if [ -f $$r/../gcc/xgcc ] ; then \
     if [ -f $$r/../newlib/Makefile ] ; then \
@@ -959,7 +959,7 @@ config.h: stamp-h1
 stamp-h1: $(srcdir)/config.in $(top_builddir)/config.status
 	@rm -f stamp-h1
 	cd $(top_builddir) && $(SHELL) ./config.status config.h
-$(srcdir)/config.in: @MAINTAINER_MODE_TRUE@ $(am__configure_deps) 
+$(srcdir)/config.in: @MAINTAINER_MODE_TRUE@ $(am__configure_deps)
 	($(am__cd) $(top_srcdir) && $(AUTOHEADER))
 	rm -f stamp-h1
 	touch $@
@@ -977,7 +977,7 @@ clean-noinstLTLIBRARIES:
 	  echo "rm -f \"$${dir}/so_locations\""; \
 	  rm -f "$${dir}/so_locations"; \
 	done
-libldtestplug.la: $(libldtestplug_la_OBJECTS) $(libldtestplug_la_DEPENDENCIES) 
+libldtestplug.la: $(libldtestplug_la_OBJECTS) $(libldtestplug_la_DEPENDENCIES)
 	$(libldtestplug_la_LINK) $(am_libldtestplug_la_rpath) $(libldtestplug_la_OBJECTS) $(libldtestplug_la_LIBADD) $(LIBS)
 install-binPROGRAMS: $(bin_PROGRAMS)
 	@$(NORMAL_INSTALL)
@@ -1032,7 +1032,7 @@ deffilep.h: deffilep.c
 	  rm -f deffilep.c; \
 	  $(MAKE) $(AM_MAKEFLAGS) deffilep.c; \
 	else :; fi
-ld-new$(EXEEXT): $(ld_new_OBJECTS) $(ld_new_DEPENDENCIES) 
+ld-new$(EXEEXT): $(ld_new_OBJECTS) $(ld_new_DEPENDENCIES)
 	@rm -f ld-new$(EXEEXT)
 	$(LINK) $(ld_new_OBJECTS) $(ld_new_LDADD) $(LIBS)
 
@@ -1461,17 +1461,17 @@ ld.info: ld.texinfo $(ld_TEXINFOS)
 	fi; \
 	rm -rf $$backupdir; exit $$rc
 
-ld.dvi: ld.texinfo $(ld_TEXINFOS) 
+ld.dvi: ld.texinfo $(ld_TEXINFOS)
 	TEXINPUTS="$(am__TEXINFO_TEX_DIR)$(PATH_SEPARATOR)$$TEXINPUTS" \
 	MAKEINFO='$(MAKEINFO) $(AM_MAKEINFOFLAGS) $(MAKEINFOFLAGS) -I $(srcdir)' \
 	$(TEXI2DVI) -o $@ `test -f 'ld.texinfo' || echo '$(srcdir)/'`ld.texinfo
 
-ld.pdf: ld.texinfo $(ld_TEXINFOS) 
+ld.pdf: ld.texinfo $(ld_TEXINFOS)
 	TEXINPUTS="$(am__TEXINFO_TEX_DIR)$(PATH_SEPARATOR)$$TEXINPUTS" \
 	MAKEINFO='$(MAKEINFO) $(AM_MAKEINFOFLAGS) $(MAKEINFOFLAGS) -I $(srcdir)' \
 	$(TEXI2PDF) -o $@ `test -f 'ld.texinfo' || echo '$(srcdir)/'`ld.texinfo
 
-ld.html: ld.texinfo $(ld_TEXINFOS) 
+ld.html: ld.texinfo $(ld_TEXINFOS)
 	rm -rf $(@:.html=.htp)
 	if $(MAKEINFOHTML) $(AM_MAKEINFOHTMLFLAGS) $(MAKEINFOFLAGS) -I $(srcdir) \
 	 -o $(@:.html=.htp) `test -f 'ld.texinfo' || echo '$(srcdir)/'`ld.texinfo; \
@@ -3354,8 +3354,7 @@ eelf_x86_64.c: $(srcdir)/emulparams/elf_x86_64.sh \
   $(ELF_DEPS) $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
 
 eelf_x86_64_hermit.c: $(srcdir)/emulparams/elf_x86_64_hermit.sh \
-  $(ELF_DEPS) $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
-	${GENSCRIPTS} elf_x86_64_hermit "$(tdir_elf_x86_64_hermit)"
+  $(ELF_DEPS) $(srcdir)/scripttempl/elf-hermit.sc ${GEN_DEPENDS}
 
 eelf_x86_64_fbsd.c: $(srcdir)/emulparams/elf_x86_64_fbsd.sh \
   $(srcdir)/emulparams/elf_x86_64.sh \
