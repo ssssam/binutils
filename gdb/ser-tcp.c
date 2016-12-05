@@ -1,6 +1,6 @@
 /* Serial interface for raw TCP connections on Un*x like systems.
 
-   Copyright (C) 1992-2014 Free Software Foundation, Inc.
+   Copyright (C) 1992-2015 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -35,7 +35,7 @@
 #include <sys/ioctl.h>  /* For FIONBIO.  */
 #endif
 
-#include <sys/time.h>
+#include "gdb_sys_time.h"
 
 #ifdef USE_WIN32API
 #include <winsock2.h>
@@ -155,7 +155,8 @@ wait_for_connect (struct serial *scb, unsigned int *polls)
 int
 net_open (struct serial *scb, const char *name)
 {
-  char *port_str, hostname[100];
+  char hostname[100];
+  const char *port_str;
   int n, port, tmp;
   int use_udp;
   struct hostent *hostent;
@@ -168,12 +169,12 @@ net_open (struct serial *scb, const char *name)
   unsigned int polls = 0;
 
   use_udp = 0;
-  if (strncmp (name, "udp:", 4) == 0)
+  if (startswith (name, "udp:"))
     {
       use_udp = 1;
       name = name + 4;
     }
-  else if (strncmp (name, "tcp:", 4) == 0)
+  else if (startswith (name, "tcp:"))
     name = name + 4;
 
   port_str = strchr (name, ':');
@@ -394,6 +395,7 @@ static const struct serial_ops tcp_ops =
   ser_base_noflush_set_tty_state,
   ser_base_setbaudrate,
   ser_base_setstopbits,
+  ser_base_setparity,
   ser_base_drain_output,
   ser_base_async,
   net_read_prim,

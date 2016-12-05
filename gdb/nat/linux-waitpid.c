@@ -1,6 +1,6 @@
 /* Wrapper implementation for waitpid for GNU/Linux (LWP layer).
 
-   Copyright (C) 2001-2014 Free Software Foundation, Inc.
+   Copyright (C) 2001-2015 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -144,7 +144,7 @@ my_waitpid (int pid, int *status, int flags)
     }
 
   linux_debug ("my_waitpid (%d, 0x%x): status(%x), %d\n",
-	       pid, flags, status ? *status : -1, ret);
+	       pid, flags, (ret > 0 && status != NULL) ? *status : -1, ret);
 
   errno = out_errno;
   return ret;

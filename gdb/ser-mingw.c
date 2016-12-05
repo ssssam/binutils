@@ -1,6 +1,6 @@
 /* Serial interface for local (hardwired) serial ports on Windows systems
 
-   Copyright (C) 2006-2014 Free Software Foundation, Inc.
+   Copyright (C) 2006-2015 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -87,8 +87,7 @@ ser_windows_open (struct serial *scb, const char *name)
       return -1;
     }
 
-  state = xmalloc (sizeof (struct ser_windows_state));
-  memset (state, 0, sizeof (struct ser_windows_state));
+  state = XCNEW (struct ser_windows_state);
   scb->state = state;
 
   /* Create a manual reset event to watch the input buffer.  */
@@ -153,7 +152,6 @@ ser_windows_raw (struct serial *scb)
   if (GetCommState (h, &state) == 0)
     return;
 
-  state.fParity = FALSE;
   state.fOutxCtsFlow = FALSE;
   state.fOutxDsrFlow = FALSE;
   state.fDtrControl = DTR_CONTROL_ENABLE;
@@ -163,7 +161,6 @@ ser_windows_raw (struct serial *scb)
   state.fNull = FALSE;
   state.fAbortOnError = FALSE;
   state.ByteSize = 8;
-  state.Parity = NOPARITY;
 
   scb->current_timeout = 0;
 
@@ -193,6 +190,40 @@ ser_windows_setstopbits (struct serial *scb, int num)
       break;
     default:
       return 1;
+    }
+
+  return (SetCommState (h, &state) != 0) ? 0 : -1;
+}
+
+/* Implement the "setparity" serial_ops callback.  */
+
+static int
+ser_windows_setparity (struct serial *scb, int parity)
+{
+  HANDLE h = (HANDLE) _get_osfhandle (scb->fd);
+  DCB state;
+
+  if (GetCommState (h, &state) == 0)
+    return -1;
+
+  switch (parity)
+    {
+    case GDBPARITY_NONE:
+      state.Parity = NOPARITY;
+      state.fParity = FALSE;
+      break;
+    case GDBPARITY_ODD:
+      state.Parity = ODDPARITY;
+      state.fParity = TRUE;
+      break;
+    case GDBPARITY_EVEN:
+      state.Parity = EVENPARITY;
+      state.fParity = TRUE;
+      break;
+    default:
+      internal_warning (__FILE__, __LINE__,
+			"Incorrect parity value: %d", parity);
+      return -1;
     }
 
   return (SetCommState (h, &state) != 0) ? 0 : -1;
@@ -688,8 +719,7 @@ ser_console_wait_handle (struct serial *scb, HANDLE *read, HANDLE *except)
 	  return;
 	}
 
-      state = xmalloc (sizeof (struct ser_console_state));
-      memset (state, 0, sizeof (struct ser_console_state));
+      state = XCNEW (struct ser_console_state);
       scb->state = state;
 
       if (is_tty)
@@ -760,7 +790,7 @@ ser_console_get_tty_state (struct serial *scb)
     {
       struct ser_console_ttystate *state;
 
-      state = (struct ser_console_ttystate *) xmalloc (sizeof *state);
+      state = XNEW (struct ser_console_ttystate);
       state->is_a_tty = 1;
       return state;
     }
@@ -785,9 +815,8 @@ struct pipe_state
 static struct pipe_state *
 make_pipe_state (void)
 {
-  struct pipe_state *ps = XNEW (struct pipe_state);
+  struct pipe_state *ps = XCNEW (struct pipe_state);
 
-  memset (ps, 0, sizeof (*ps));
   ps->wait.read_event = INVALID_HANDLE_VALUE;
   ps->wait.except_event = INVALID_HANDLE_VALUE;
   ps->wait.start_select = INVALID_HANDLE_VALUE;
@@ -1176,8 +1205,7 @@ net_windows_open (struct serial *scb, const char *name)
   if (ret != 0)
     return ret;
 
-  state = xmalloc (sizeof (struct net_windows_state));
-  memset (state, 0, sizeof (struct net_windows_state));
+  state = XCNEW (struct net_windows_state);
   scb->state = state;
 
   /* Associate an event with the socket.  */
@@ -1227,6 +1255,7 @@ static const struct serial_ops hardwire_ops =
   ser_base_noflush_set_tty_state,
   ser_windows_setbaudrate,
   ser_windows_setstopbits,
+  ser_windows_setparity,
   ser_windows_drain_output,
   ser_base_async,
   ser_windows_read_prim,
@@ -1255,6 +1284,7 @@ static const struct serial_ops tty_ops =
   ser_base_set_tty_state,
   ser_base_print_tty_state,
   ser_base_noflush_set_tty_state,
+  NULL,
   NULL,
   NULL,
   ser_base_drain_output,
@@ -1287,6 +1317,7 @@ static const struct serial_ops pipe_ops =
   ser_base_noflush_set_tty_state,
   ser_base_setbaudrate,
   ser_base_setstopbits,
+  ser_base_setparity,
   ser_base_drain_output,
   ser_base_async,
   pipe_windows_read,
@@ -1317,6 +1348,7 @@ static const struct serial_ops tcp_ops =
   ser_base_noflush_set_tty_state,
   ser_base_setbaudrate,
   ser_base_setstopbits,
+  ser_base_setparity,
   ser_base_drain_output,
   ser_base_async,
   net_read_prim,

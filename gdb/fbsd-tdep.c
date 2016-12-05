@@ -1,6 +1,6 @@
 /* Target-dependent code for FreeBSD, architecture-independent.
 
-   Copyright (C) 2002-2014 Free Software Foundation, Inc.
+   Copyright (C) 2002-2015 Free Software Foundation, Inc.
 
    This file is part of GDB.
 
@@ -64,11 +64,12 @@ fbsd_collect_regset_section_cb (const char *sect_name, int size,
 				const char *human_name, void *cb_data)
 {
   char *buf;
-  struct fbsd_collect_regset_section_cb_data *data = cb_data;
+  struct fbsd_collect_regset_section_cb_data *data
+    = (struct fbsd_collect_regset_section_cb_data *) cb_data;
 
   gdb_assert (regset->collect_regset);
 
-  buf = xmalloc (size);
+  buf = (char *) xmalloc (size);
   regset->collect_regset (regset, data->regcache, -1, buf, size);
 
   /* PRSTATUS still needs to be treated specially.  */
@@ -89,7 +90,7 @@ fbsd_collect_regset_section_cb (const char *sect_name, int size,
 static char *
 fbsd_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
 {
-  const struct regcache *regcache = get_current_regcache ();
+  struct regcache *regcache = get_current_regcache ();
   char *note_data;
   Elf_Internal_Ehdr *i_ehdrp;
   struct fbsd_collect_regset_section_cb_data data;
@@ -104,6 +105,7 @@ fbsd_make_corefile_notes (struct gdbarch *gdbarch, bfd *obfd, int *note_size)
   data.obfd = obfd;
   data.note_data = NULL;
   data.note_size = note_size;
+  target_fetch_registers (regcache, -1);
   gdbarch_iterate_over_regset_sections (gdbarch,
 					fbsd_collect_regset_section_cb,
 					&data, regcache);

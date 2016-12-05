@@ -1,5 +1,5 @@
 /* Low level interface to Windows debugging, for gdbserver.
-   Copyright (C) 2006-2014 Free Software Foundation, Inc.
+   Copyright (C) 2006-2015 Free Software Foundation, Inc.
 
    Contributed by Leo Zayas.  Based on "win32-nat.c" from GDB.
 
@@ -26,8 +26,6 @@
 #include "gdbthread.h"
 #include "dll.h"
 #include "hostio.h"
-
-#include <stdint.h>
 #include <windows.h>
 #include <winnt.h>
 #include <imagehlp.h>
@@ -129,7 +127,7 @@ static void
 win32_get_thread_context (win32_thread_info *th)
 {
   memset (&th->context, 0, sizeof (CONTEXT));
-  (*the_low_target.get_thread_context) (th, &current_event);
+  (*the_low_target.get_thread_context) (th);
 #ifdef _WIN32_WCE
   memcpy (&th->base_context, &th->context, sizeof (CONTEXT));
 #endif
@@ -153,23 +151,24 @@ win32_set_thread_context (win32_thread_info *th)
      it between stopping and resuming.  */
   if (memcmp (&th->context, &th->base_context, sizeof (CONTEXT)) != 0)
 #endif
-    (*the_low_target.set_thread_context) (th, &current_event);
+    SetThreadContext (th->h, &th->context);
 }
 
-/* Find a thread record given a thread id.  If GET_CONTEXT is set then
-   also retrieve the context for this thread.  */
-static win32_thread_info *
-thread_rec (ptid_t ptid, int get_context)
+/* Set the thread context of the thread associated with TH.  */
+
+static void
+win32_prepare_to_resume (win32_thread_info *th)
 {
-  struct thread_info *thread;
-  win32_thread_info *th;
+  if (the_low_target.prepare_to_resume != NULL)
+    (*the_low_target.prepare_to_resume) (th);
+}
 
-  thread = (struct thread_info *) find_inferior_id (&all_threads, ptid);
-  if (thread == NULL)
-    return NULL;
+/* See win32-low.h.  */
 
-  th = inferior_target_data (thread);
-  if (get_context && th->context.ContextFlags == 0)
+void
+win32_require_context (win32_thread_info *th)
+{
+  if (th->context.ContextFlags == 0)
     {
       if (!th->suspended)
 	{
@@ -185,7 +184,23 @@ thread_rec (ptid_t ptid, int get_context)
 
       win32_get_thread_context (th);
     }
+}
 
+/* Find a thread record given a thread id.  If GET_CONTEXT is set then
+   also retrieve the context for this thread.  */
+static win32_thread_info *
+thread_rec (ptid_t ptid, int get_context)
+{
+  struct thread_info *thread;
+  win32_thread_info *th;
+
+  thread = (struct thread_info *) find_inferior_id (&all_threads, ptid);
+  if (thread == NULL)
+    return NULL;
+
+  th = inferior_target_data (thread);
+  if (get_context)
+    win32_require_context (th);
   return th;
 }
 
@@ -199,7 +214,7 @@ child_add_thread (DWORD pid, DWORD tid, HANDLE h, void *tlb)
   if ((th = thread_rec (ptid, FALSE)))
     return th;
 
-  th = xcalloc (1, sizeof (*th));
+  th = XCNEW (win32_thread_info);
   th->tid = tid;
   th->h = h;
   th->thread_local_base = (CORE_ADDR) (uintptr_t) tlb;
@@ -419,22 +434,26 @@ continue_one_thread (struct inferior_list_entry *this_thread, void *id_ptr)
   int thread_id = * (int *) id_ptr;
   win32_thread_info *th = inferior_target_data (thread);
 
-  if ((thread_id == -1 || thread_id == th->tid)
-      && th->suspended)
+  if (thread_id == -1 || thread_id == th->tid)
     {
-      if (th->context.ContextFlags)
-	{
-	  win32_set_thread_context (th);
-	  th->context.ContextFlags = 0;
-	}
+      win32_prepare_to_resume (th);
 
-      if (ResumeThread (th->h) == (DWORD) -1)
+      if (th->suspended)
 	{
-	  DWORD err = GetLastError ();
-	  OUTMSG (("warning: ResumeThread failed in continue_one_thread, "
-		   "(error %d): %s\n", (int) err, strwinerror (err)));
+	  if (th->context.ContextFlags)
+	    {
+	      win32_set_thread_context (th);
+	      th->context.ContextFlags = 0;
+	    }
+
+	  if (ResumeThread (th->h) == (DWORD) -1)
+	    {
+	      DWORD err = GetLastError ();
+	      OUTMSG (("warning: ResumeThread failed in continue_one_thread, "
+		       "(error %d): %s\n", (int) err, strwinerror (err)));
+	    }
+	  th->suspended = 0;
 	}
-      th->suspended = 0;
     }
 
   return 0;
@@ -757,7 +776,7 @@ handle_output_debug_string (struct target_waitstatus *ourstatus)
 	return;
     }
 
-  if (strncmp (s, "cYg", 3) != 0)
+  if (!startswith (s, "cYg"))
     {
       if (!server_waiting)
 	{
@@ -937,6 +956,8 @@ win32_resume (struct thread_resume *resume_info, size_t n)
   th = thread_rec (ptid, FALSE);
   if (th)
     {
+      win32_prepare_to_resume (th);
+
       if (th->context.ContextFlags)
 	{
 	  /* Move register values from the inferior into the thread
@@ -1063,7 +1084,7 @@ get_image_name (HANDLE h, void *address, int unicode)
     ReadProcessMemory (h, address_ptr, buf, len, &done);
   else
     {
-      WCHAR *unicode_address = (WCHAR *) alloca (len * sizeof (WCHAR));
+      WCHAR *unicode_address = XALLOCAVEC (WCHAR, len);
       ReadProcessMemory (h, address_ptr, unicode_address, len * sizeof (WCHAR),
 			 &done);
 
@@ -1762,8 +1783,18 @@ win32_get_tib_address (ptid_t ptid, CORE_ADDR *addr)
   return 1;
 }
 
+/* Implementation of the target_ops method "sw_breakpoint_from_kind".  */
+
+static const gdb_byte *
+win32_sw_breakpoint_from_kind (int kind, int *size)
+{
+  *size = the_low_target.breakpoint_len;
+  return the_low_target.breakpoint;
+}
+
 static struct target_ops win32_target_ops = {
   win32_create_inferior,
+  NULL,  /* arch_setup */
   win32_attach,
   win32_kill,
   win32_detach,
@@ -1784,6 +1815,11 @@ static struct target_ops win32_target_ops = {
   win32_supports_z_point_type,
   win32_insert_point,
   win32_remove_point,
+  NULL, /* stopped_by_sw_breakpoint */
+  NULL, /* supports_stopped_by_sw_breakpoint */
+  NULL, /* stopped_by_hw_breakpoint */
+  NULL, /* supports_stopped_by_hw_breakpoint */
+  target_can_do_hardware_single_step,
   win32_stopped_by_watchpoint,
   win32_stopped_data_address,
   NULL, /* read_offsets */
@@ -1800,6 +1836,10 @@ static struct target_ops win32_target_ops = {
   NULL, /* async */
   NULL, /* start_non_stop */
   NULL, /* supports_multi_process */
+  NULL, /* supports_fork_events */
+  NULL, /* supports_vfork_events */
+  NULL, /* supports_exec_events */
+  NULL, /* handle_new_gdb_connection */
   NULL, /* handle_monitor_command */
   NULL, /* core_of_thread */
   NULL, /* read_loadmap */
@@ -1808,7 +1848,28 @@ static struct target_ops win32_target_ops = {
   NULL, /* read_pc */
   NULL, /* write_pc */
   NULL, /* thread_stopped */
-  win32_get_tib_address
+  win32_get_tib_address,
+  NULL, /* pause_all */
+  NULL, /* unpause_all */
+  NULL, /* stabilize_threads */
+  NULL, /* install_fast_tracepoint_jump_pad */
+  NULL, /* emit_ops */
+  NULL, /* supports_disable_randomization */
+  NULL, /* get_min_fast_tracepoint_insn_len */
+  NULL, /* qxfer_libraries_svr4 */
+  NULL, /* support_agent */
+  NULL, /* support_btrace */
+  NULL, /* enable_btrace */
+  NULL, /* disable_btrace */
+  NULL, /* read_btrace */
+  NULL, /* read_btrace_conf */
+  NULL, /* supports_range_stepping */
+  NULL, /* pid_to_exec_file */
+  NULL, /* multifs_open */
+  NULL, /* multifs_unlink */
+  NULL, /* multifs_readlink */
+  NULL, /* breakpoint_kind_from_pc */
+  win32_sw_breakpoint_from_kind,
 };
 
 /* Initialize the Win32 backend.  */
@@ -1816,8 +1877,5 @@ void
 initialize_low (void)
 {
   set_target_ops (&win32_target_ops);
-  if (the_low_target.breakpoint != NULL)
-    set_breakpoint_data (the_low_target.breakpoint,
-			 the_low_target.breakpoint_len);
   the_low_target.arch_setup ();
 }

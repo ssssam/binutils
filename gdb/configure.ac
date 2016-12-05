@@ -1,5 +1,5 @@
 dnl Autoconf configure script for GDB, the GNU debugger.
-dnl Copyright (C) 1995-2014 Free Software Foundation, Inc.
+dnl Copyright (C) 1995-2015 Free Software Foundation, Inc.
 dnl
 dnl This file is part of GDB.
 dnl
@@ -27,6 +27,8 @@ AM_MAINTAINER_MODE
 . $srcdir/../bfd/development.sh
 
 AC_PROG_CC
+AC_PROG_CXX
+
 AC_USE_SYSTEM_EXTENSIONS
 ACX_LARGEFILE
 AM_PROG_CC_STDC
@@ -35,6 +37,9 @@ AM_PROG_INSTALL_STRIP
 AC_CONFIG_AUX_DIR(..)
 AC_CANONICAL_SYSTEM
 AC_ARG_PROGRAM
+
+# See if we are building with C++, and substitute COMPILER.
+GDB_AC_BUILD_WITH_CXX
 
 # Dependency checking.
 ZW_CREATE_DEPDIR
@@ -51,11 +56,18 @@ esac
 AM_CONDITIONAL(GMAKE, test "$MAKE_IS_GNU" = yes)
 AC_PROG_MAKE_SET
 
+gnulib_extra_configure_args=
+# If large-file support is disabled, make sure gnulib does the same.
+if test "$enable_largefile" = no; then
+gnulib_extra_configure_args="$gnulib_extra_configure_args --disable-largefile"
+fi
+
 # Configure gnulib.  We need to build gnulib under some other
 # directory not "gnulib", to avoid the problem of both GDB and
 # GDBserver wanting to build it in the same directory, when building
 # in the source dir.
-ACX_CONFIGURE_DIR(["gnulib"], ["build-gnulib"])
+ACX_CONFIGURE_DIR(["gnulib"], ["build-gnulib"],
+                  ["$gnulib_extra_configure_args"])
 
 dnl List of object files and targets accumulated by configure.
 
@@ -197,6 +209,10 @@ else
 fi
 
 . $srcdir/configure.host
+
+# Add in the common host objects.
+. $srcdir/common/common.host
+gdb_host_obs="$gdb_host_obs $common_host_obs"
 
 # Accumulate some settings from configure.tgt over all enabled targets
 
@@ -518,8 +534,10 @@ AC_SEARCH_LIBS(socketpair, socket)
 # Link in zlib if we can.  This allows us to read compressed debug sections.
 AM_ZLIB
 
-# On HP/UX we may need libxpdl for dlgetmodinfo (used by solib-pa64.c).
-AC_SEARCH_LIBS(dlgetmodinfo, [dl xpdl])
+# On FreeBSD we may need libutil for kinfo_getvmmap (used by fbsd-nat.c).
+AC_SEARCH_LIBS(kinfo_getvmmap, util,
+  [AC_DEFINE(HAVE_KINFO_GETVMMAP, 1,
+            [Define to 1 if your system has the kinfo_getvmmap function. ])])
 
 AM_ICONV
 
@@ -545,33 +563,6 @@ AS_HELP_STRING([--with-iconv-bin=PATH], [specify where to find the iconv program
                     [Path of directory of iconv program.])
  GDB_AC_DEFINE_RELOCATABLE(ICONV_BIN, iconv, ${iconv_bin})
 ])
-
-# On alpha-osf, it appears that libtermcap and libcurses are not compatible.
-# There is a very specific comment in /usr/include/curses.h explaining that
-# termcap routines built into libcurses must not be used.
-#
-# The symptoms we observed so far is GDB unexpectedly changing
-# the terminal settings when tgetent is called - this is particularly
-# visible as the output is missing carriage returns, and so rapidly
-# becomes very hard to read.
-#
-# The readline configure script has already decided that libtermcap
-# was enough for its purposes, and so decided to build readline using
-# libtermcap.  Since the TUI mode requires curses, building GDB with
-# TUI enabled results in both libraries to be used at the same time,
-# which is not allowed.  This basically means that GDB with TUI is
-# broken on alpha-osf.
-
-case $host_os in
-  osf* )
-    if test x"$enable_tui" = xyes; then
-      AC_MSG_ERROR([Building GDB with TUI mode is not supported on this host])
-    fi
-    if test x"$enable_tui" = xauto; then
-      enable_tui=no
-    fi
-    ;;
-esac
 
 # For the TUI, we need enhanced curses functionality.
 if test x"$enable_tui" != xno; then
@@ -626,17 +617,13 @@ case $host_os in
   go32* | *djgpp*)
     ac_cv_search_tgetent="none required"
     ;;
-  *mingw32*)
-    ac_cv_search_tgetent="none required"
-    CONFIG_OBS="$CONFIG_OBS windows-termcap.o"
-    ;;
 esac
 
 # These are the libraries checked by Readline.
 AC_SEARCH_LIBS(tgetent, [termcap tinfo curses ncurses])
 
 if test "$ac_cv_search_tgetent" = no; then
-  AC_MSG_ERROR([no termcap library found])
+  CONFIG_OBS="$CONFIG_OBS stub-termcap.o"
 fi
 
 AC_ARG_WITH([system-readline],
@@ -1100,6 +1087,11 @@ AC_DEFUN([AC_TRY_LIBGUILE],
                     GUILE_CPPFLAGS=$new_CPPFLAGS
                     GUILE_LIBS=$new_LIBS],
                    [found_usable_guile=no])
+    dnl scm_set_automatic_finalization_enabled added in Guile 2.2.
+    AC_CHECK_FUNC(scm_set_automatic_finalization_enabled,
+      AC_DEFINE(HAVE_GUILE_MANUAL_FINALIZATION, 1,
+                [Define if Guile supports manual finalization.])
+    )
     CPPFLAGS=$save_CPPFLAGS
     LIBS=$save_LIBS
     if test "${found_usable_guile}" = no; then
@@ -1250,6 +1242,40 @@ if test "$ENABLE_LIBMCHECK" = "yes" \
   AC_MSG_WARN(--enable-libmcheck may lead to spurious crashes if threads are used in python)
 fi
 
+AC_ARG_WITH(intel_pt,
+  AS_HELP_STRING([--with-intel-pt], [include Intel(R) Processor Trace support (auto/yes/no)]),
+  [], [with_intel_pt=auto])
+AC_MSG_CHECKING([whether to use intel pt])
+AC_MSG_RESULT([$with_intel_pt])
+
+if test "${with_intel_pt}" = no; then
+  AC_MSG_WARN([Intel(R) Processor Trace support disabled; some features may be unavailable.])
+  HAVE_LIBIPT=no
+else
+  AC_PREPROC_IFELSE(AC_LANG_SOURCE([[
+#include <linux/perf_event.h>
+#ifndef PERF_ATTR_SIZE_VER5
+# error
+#endif
+  ]]), [perf_event=yes], [perf_event=no])
+  if test "$perf_event" != yes; then
+    if test "$with_intel_pt" = yes; then
+      AC_MSG_ERROR([linux/perf_event.h missing or too old])
+    else
+      AC_MSG_WARN([linux/perf_event.h missing or too old; some features may be unavailable.])
+    fi
+  fi
+
+  AC_LIB_HAVE_LINKFLAGS([ipt], [], [#include "intel-pt.h"], [pt_insn_alloc_decoder (0);])
+  if test "$HAVE_LIBIPT" != yes; then
+    if test "$with_intel_pt" = yes; then
+      AC_MSG_ERROR([libipt is missing or unusable])
+    else
+      AC_MSG_WARN([libipt is missing or unusable; some features may be unavailable.])
+    fi
+  fi
+fi
+
 # ------------------------- #
 # Checks for header files.  #
 # ------------------------- #
@@ -1298,6 +1324,8 @@ AC_CHECK_HEADERS(term.h, [], [],
 # Checks for declarations.  #
 # ------------------------- #
 
+libiberty_INIT
+
 AC_CHECK_DECLS([free, malloc, realloc, snprintf])
 AM_LC_MESSAGES
 
@@ -1311,7 +1339,6 @@ AC_CHECK_MEMBERS([struct stat.st_blocks, struct stat.st_blksize])
 # Checks for types.  #
 # ------------------ #
 
-AC_TYPE_SIGNAL
 AC_CHECK_TYPES(socklen_t, [], [],
 [#include <sys/types.h>
 #include <sys/socket.h>
@@ -1329,88 +1356,20 @@ AC_C_BIGENDIAN
 # Checks for library functions.  #
 # ------------------------------ #
 
-AC_FUNC_ALLOCA
 AC_FUNC_MMAP
 AC_FUNC_VFORK
-AC_CHECK_FUNCS([canonicalize_file_name realpath getrusage getuid getgid \
-		pipe poll pread pread64 pwrite readlink resize_term \
+AC_CHECK_FUNCS([getauxval getrusage getuid getgid \
+		pipe poll pread pread64 pwrite resize_term \
 		sbrk setpgid setpgrp setsid \
 		sigaction sigprocmask sigsetmask socketpair \
 		ttrace wborder wresize setlocale iconvlist libiconvlist btowc \
-		setrlimit getrlimit posix_madvise waitpid lstat \
-		ptrace64 sigaltstack])
+		setrlimit getrlimit posix_madvise waitpid \
+		ptrace64 sigaltstack mkdtemp setns])
 AM_LANGINFO_CODESET
 GDB_AC_COMMON
 
-# Check the return and argument types of ptrace.  No canned test for
-# this, so roll our own.
-gdb_ptrace_headers='
-#include <sys/types.h>
-#if HAVE_SYS_PTRACE_H
-# include <sys/ptrace.h>
-#endif
-#if HAVE_UNISTD_H
-# include <unistd.h>
-#endif
-'
-# There is no point in checking if we don't have a prototype.
-AC_CHECK_DECLS(ptrace, [], [
-  : ${gdb_cv_func_ptrace_ret='int'}
-  : ${gdb_cv_func_ptrace_args='int,int,long,long'}
-], $gdb_ptrace_headers)
-# Check return type.  Varargs (used on GNU/Linux) conflict with the
-# empty argument list, so check for that explicitly.
-AC_CACHE_CHECK([return type of ptrace], gdb_cv_func_ptrace_ret,
-  AC_TRY_COMPILE($gdb_ptrace_headers,
-    [extern long ptrace (enum __ptrace_request, ...);],
-    gdb_cv_func_ptrace_ret='long',
-    AC_TRY_COMPILE($gdb_ptrace_headers,
-      [extern int ptrace ();],
-      gdb_cv_func_ptrace_ret='int',
-      gdb_cv_func_ptrace_ret='long')))
-AC_DEFINE_UNQUOTED(PTRACE_TYPE_RET, $gdb_cv_func_ptrace_ret,
-  [Define as the return type of ptrace.])
-# Check argument types.
-AC_CACHE_CHECK([types of arguments for ptrace], gdb_cv_func_ptrace_args, [
-  AC_TRY_COMPILE($gdb_ptrace_headers,
-    [extern long ptrace (enum __ptrace_request, ...);],
-    [gdb_cv_func_ptrace_args='int,int,long,long'],[
-for gdb_arg1 in 'int' 'long'; do
- for gdb_arg2 in 'pid_t' 'int' 'long'; do
-  for gdb_arg3 in 'int *' 'caddr_t' 'int' 'long' 'void *'; do
-   for gdb_arg4 in 'int' 'long' 'void *'; do
-     AC_TRY_COMPILE($gdb_ptrace_headers, [
-extern $gdb_cv_func_ptrace_ret
-  ptrace ($gdb_arg1, $gdb_arg2, $gdb_arg3, $gdb_arg4);
-], [gdb_cv_func_ptrace_args="$gdb_arg1,$gdb_arg2,$gdb_arg3,$gdb_arg4";
-    break 4;])
-    for gdb_arg5 in 'int *' 'int' 'long'; do
-     AC_TRY_COMPILE($gdb_ptrace_headers, [
-extern $gdb_cv_func_ptrace_ret
-  ptrace ($gdb_arg1, $gdb_arg2, $gdb_arg3, $gdb_arg4, $gdb_arg5);
-], [
-gdb_cv_func_ptrace_args="$gdb_arg1,$gdb_arg2,$gdb_arg3,$gdb_arg4,$gdb_arg5";
-    break 5;])
-    done
-   done
-  done
- done
-done
-# Provide a safe default value.
-: ${gdb_cv_func_ptrace_args='int,int,long,long'}
-])])
-ac_save_IFS=$IFS; IFS=','
-set dummy `echo "$gdb_cv_func_ptrace_args" | sed 's/\*/\*/g'`
-IFS=$ac_save_IFS
-shift
-AC_DEFINE_UNQUOTED(PTRACE_TYPE_ARG3, $[3],
-  [Define to the type of arg 3 for ptrace.])
-AC_DEFINE_UNQUOTED(PTRACE_TYPE_ARG4, $[4],
-  [Define to the type of arg 4 for ptrace.])
-if test -n "$[5]"; then
-  AC_DEFINE_UNQUOTED(PTRACE_TYPE_ARG5, $[5],
-    [Define to the type of arg 5 for ptrace.])
-fi
+# Check the return and argument types of ptrace.
+GDB_AC_PTRACE
 
 dnl AC_FUNC_SETPGRP does not work when cross compiling
 dnl Instead, assume we will have a prototype for setpgrp if cross compiling.
@@ -1973,8 +1932,11 @@ AC_ARG_ENABLE(werror,
      *) AC_MSG_ERROR(bad value ${enableval} for --enable-werror) ;;
    esac])
 
-# Enable -Werror by default when using gcc.  Turn it off for releases.
-if test "${GCC}" = yes -a -z "${ERROR_ON_WARNING}" && $development; then
+# Enable -Werror by default when using gcc in C mode.  Leave it off
+# for C++ until we're warning clean.  Turn it off for releases.
+if test "${GCC}" = yes -a -z "${ERROR_ON_WARNING}" \
+   && test x"$enable_build_with_cxx" != x"yes" \
+   && $development; then
     ERROR_ON_WARNING=yes
 fi
 
@@ -1983,12 +1945,21 @@ if test "${ERROR_ON_WARNING}" = yes ; then
     WERROR_CFLAGS="-Werror"
 fi
 
-build_warnings="-Wall -Wdeclaration-after-statement -Wpointer-arith \
--Wpointer-sign \
+# These options work in either C or C++ modes.
+build_warnings="-Wall -Wpointer-arith \
 -Wno-unused -Wunused-value -Wunused-function \
--Wno-switch -Wno-char-subscripts -Wmissing-prototypes \
--Wdeclaration-after-statement -Wempty-body -Wmissing-parameter-type \
+-Wno-switch -Wno-char-subscripts \
+-Wempty-body"
+
+# Now add in C and C++ specific options, depending on mode.
+if test "$enable_build_with_cxx" = "yes"; then
+   build_warnings="$build_warnings -Wno-sign-compare -Wno-write-strings \
+-Wno-narrowing"
+else
+   build_warnings="$build_warnings -Wpointer-sign -Wmissing-prototypes \
+-Wdeclaration-after-statement -Wmissing-parameter-type \
 -Wold-style-declaration -Wold-style-definition"
+fi
 
 # Enable -Wno-format by default when using gcc on mingw since many
 # GCC versions complain about %I64.
@@ -2025,6 +1996,13 @@ esac
 if test x"$silent" != x"yes" && test x"$build_warnings" != x""; then
   echo "Setting GDB specific compiler warning flags = $build_warnings" 6>&1
 fi])dnl
+
+# The set of warnings supported by a C++ compiler is not the same as
+# of the C compiler.
+if test "$enable_build_with_cxx" = "yes"; then
+    AC_LANG_PUSH([C++])
+fi
+
 WARN_CFLAGS=""
 if test "x${build_warnings}" != x -a "x$GCC" = xyes
 then
@@ -2034,17 +2012,25 @@ then
     for w in ${build_warnings}; do
 	case $w in
 	-Werr*) WERROR_CFLAGS=-Werror ;;
-	*) # Check that GCC accepts it
+	*)
+	    # Check whether GCC accepts it.
 	    saved_CFLAGS="$CFLAGS"
 	    CFLAGS="$CFLAGS $w"
+	    saved_CXXFLAGS="$CXXFLAGS"
+	    CXXFLAGS="$CXXFLAGS $w"
 	    AC_TRY_COMPILE([],[],WARN_CFLAGS="${WARN_CFLAGS} $w",)
 	    CFLAGS="$saved_CFLAGS"
+	    CXXFLAGS="$saved_CXXFLAGS"
 	esac
     done
     AC_MSG_RESULT(${WARN_CFLAGS} ${WERROR_CFLAGS})
 fi
 AC_SUBST(WARN_CFLAGS)
 AC_SUBST(WERROR_CFLAGS)
+
+if test "$enable_build_with_cxx" = "yes"; then
+   AC_LANG_POP([C++])
+fi
 
 # In the Cygwin environment, we need some additional flags.
 AC_CACHE_CHECK([for cygwin], gdb_cv_os_cygwin,
@@ -2090,7 +2076,7 @@ AC_SUBST(WIN32LIBS)
 GDB_AC_CHECK_BFD([for ELF support in BFD], gdb_cv_var_elf,
                  [bfd_get_elf_phdr_upper_bound (NULL)], elf-bfd.h)
 if test $gdb_cv_var_elf = yes; then
-  CONFIG_OBS="$CONFIG_OBS elfread.o stap-probe.o"
+  CONFIG_OBS="$CONFIG_OBS elfread.o stap-probe.o dtrace-probe.o"
   AC_DEFINE(HAVE_ELF, 1,
 	    [Define if ELF support should be included.])
   # -ldl is provided by bfd/Makfile.am (LIBDL) <PLUGINS>.
@@ -2104,13 +2090,6 @@ GDB_AC_CHECK_BFD([for Mach-O support in BFD], gdb_cv_var_macho,
                  [bfd_mach_o_lookup_command (NULL, 0, NULL)], mach-o.h)
 if test $gdb_cv_var_macho = yes; then
   CONFIG_OBS="$CONFIG_OBS machoread.o"
-fi
-
-# Add SOM support to GDB, but only if BFD includes it.
-GDB_AC_CHECK_BFD([for SOM support in BFD], gdb_cv_var_som,
-                 [bfd_som_attach_aux_hdr (NULL, 0, NULL)], som.h)
-if test $gdb_cv_var_som = yes; then
-  CONFIG_OBS="$CONFIG_OBS somread.o"
 fi
 
 # Add any host-specific objects to GDB.
@@ -2460,18 +2439,8 @@ dnl  At the moment, we just assume it's UTF-8.
 AC_DEFINE(GDB_DEFAULT_HOST_CHARSET, "UTF-8",
           [Define to be a string naming the default host character set.])
 
-# Undo the $ec_script escaping suitable for Makefile.
-transform=`echo "$program_transform_name" | sed -e 's/[\\$][\\$]/\\$/g'`
-GDB_TRANSFORM_NAME=`echo gdb | sed -e "$transform"`
-if test "x$GDB_TRANSFORM_NAME" = x; then
-  GDB_TRANSFORM_NAME=gdb
-fi
-AC_SUBST(GDB_TRANSFORM_NAME)
-GCORE_TRANSFORM_NAME=`echo gcore | sed -e "$transform"`
-if test "x$GCORE_TRANSFORM_NAME" = x; then
-  GCORE_TRANSFORM_NAME=gcore
-fi
-AC_SUBST(GCORE_TRANSFORM_NAME)
+GDB_AC_TRANSFORM([gdb], [GDB_TRANSFORM_NAME])
+GDB_AC_TRANSFORM([gcore], [GCORE_TRANSFORM_NAME])
 AC_CONFIG_FILES([gcore], [chmod +x gcore])
 
 AC_OUTPUT(Makefile gdb-gdb.gdb doc/Makefile data-directory/Makefile,
