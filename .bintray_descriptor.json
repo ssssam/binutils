@@ -19,8 +19,8 @@
     },
 
     "files":
-    [{"includePattern": "../(*\.deb)$", "uploadPattern": "$1",
-    "matrixParams": {
+    [{"includePattern": "../bin(.*)*/(.*\\.deb)", "$1",
+      "matrixParams": {
         "deb_distribution": "vivid",
         "deb_component": "main",
         "deb_architecture": "amd64"},
