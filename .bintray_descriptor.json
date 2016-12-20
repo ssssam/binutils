@@ -19,7 +19,7 @@
     },
 
     "files":
-    [{"includePattern": "../bin(.*)*/(.*\\.deb)", "$1",
+    [{"includePattern": "../bin(.*)*(.*\\.deb)", "$1",
       "matrixParams": {
         "deb_distribution": "vivid",
         "deb_component": "main",
