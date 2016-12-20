@@ -19,12 +19,12 @@
     },
 
     "files":
-    [{"includePattern": "../bin(.*)*(.*\\.deb)", "$1",
+    [{"includePattern": "../binutils(.*\\.deb)", "uploadPattern": "$1",
       "matrixParams": {
         "deb_distribution": "vivid",
         "deb_component": "main",
-        "deb_architecture": "amd64"},
-	"override": 1
+        "deb_architecture": "amd64",
+	"override": 1}
     }],
     "publish": true
 }
