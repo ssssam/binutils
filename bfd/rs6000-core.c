@@ -137,7 +137,7 @@ typedef union
 # ifndef BFD64
 #  define CORE_NEW(c)        (!(c).old.c_entries)
 # else
-#  define CORE_NEW(c)   (!(c).new_dump.c_entries)
+#  define CORE_NEW(c)   1
 # endif
 #else
 # define CORE_NEW(c)	0
